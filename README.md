@@ -1,0 +1,2 @@
+# Shunei
+Shunei (SHU Network Easy Implementation) is a cross platform single header library to make networking easier and united in C. According to the plan, in the first step it will provide server-client and P2P models, both blocking.
