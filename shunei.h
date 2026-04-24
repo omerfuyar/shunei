@@ -3,6 +3,7 @@
 #pragma region Shunei Macros
 
 #define SHUM_ADDRESS_STRLEN 32
+#define SHUM_LISTEN_CONNECTION_QUEUE 8
 
 #pragma endregion Shunei Macros
 
@@ -26,19 +27,14 @@ typedef enum SHUResult
     SHUResult_Err,
 } SHUResult;
 
-/// @brief Type of connections supported by shunei.
-typedef enum SHUConnectionType
+/// @brief Struct to hold necessary information for a connection, used for all types of SHUConnectionType types.
+/// @note !!! USE ONLY WITH FUNCTIONS MADE FOR THIS STRUCT, NEVER WRITE MANUALLY !!!
+typedef struct SHUConnection
 {
-    SHUConnectionType_Server,
-    SHUConnectionType_Client,
-    SHUConnectionType_PeerHost,
-    SHUConnectionType_PeerJoin,
-} SHUConnectionType;
-
-/// @brief !!! NEVER USE THIS STRUCT STANDALONE, IT IS MADE FOR CONNECTION STRUCT !!!
-typedef struct SHUSocket
-{
+    unsigned long long clientCount;
     struct sockaddr_in address;
+    void *clientSockets;
+
 #ifdef _WIN32
     SOCKET fileDescriptor;
     int addressLength;
@@ -46,35 +42,42 @@ typedef struct SHUSocket
     int fileDescriptor;
     socklen_t addressLength;
 #endif
-} SHUSocket;
-
-/// @brief Struct to hold necessary information for a connection, used for all types of SHUConnectionType types.
-/// @note !!! USE ONLY WITH FUNCTIONS MADE FOR THIS STRUCT, NEVER WRITE MANUALLY !!!
-typedef struct SHUConnection
-{
-    SHUConnectionType type;
-    SHUSocket socket;
-    union
-    {
-        SHUSocket listener; // only used by server / p2p host
-        struct
-        {
-            char ip[SHUM_ADDRESS_STRLEN];
-            unsigned short port;
-        } speaker; // only used by client / p2p join
-    };
 } SHUConnection;
 
-SHUResult SHU_Initialize(void);
+/// @brief Initializes the network subsystem. Must be called before any other shunei function. See SHU_TerminateNetwork for cleanup.
+/// @return Result of the operation. See SHUResult enum for possible values.
+SHUResult SHU_InitializeNetwork(void);
 
-SHUResult SHU_Terminate(void);
+/// @brief Terminates the network subsystem and releases any associated resources. Must be called when network operations are no longer needed. Automatically calls on exit if network is initialized. See SHU_InitializeNetwork for initialization.
+/// @return Result of the operation. See SHUResult enum for possible values.
+SHUResult SHU_TerminateNetwork(void);
 
-SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, SHUConnectionType type, const char *ip, unsigned short port);
+/// @brief Creates and configures a connection according to the specified type and parameters.
+/// @param retConnection Pointer to a SHUConnection struct where the created connection information will be stored. Must not be NULL.
+/// @param clientCount Leave 0 to create a client connection, or specify the maximum number of clients for a server connection.
+/// @param ip IP address to bind or connect to, depending on the connection type. For server, this can be NULL to bind to all interfaces. For client types, this must be a valid IP address string.
+/// @param port Port number to bind or connect to.
+/// @return Result of the operation. See SHUResult enum for possible values.
+/// @note For server types, this function creates a listening socket bound to the specified IP and port.
+SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, unsigned long long clientCount, const char *ip, unsigned short port);
 
+/// @brief Destroys a connection and releases any associated resources.
+/// @param connection Pointer to the SHUConnection struct representing the connection to be destroyed. Must not be NULL.
+/// @return Result of the operation. See SHUResult enum for possible values.
 SHUResult SHU_ConnectionDestroy(SHUConnection *connection);
 
+/// @brief Sends data through a connection.
+/// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
+/// @param data Pointer to the data to send.
+/// @param dataSize Size of the data to send.
+/// @return Result of the operation. See SHUResult enum for possible values.
 SHUResult SHU_ConnectionSend(const SHUConnection *connection, const void *data, unsigned long long dataSize);
 
+/// @brief Receives data through a connection.
+/// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
+/// @param buffer Pointer to the buffer where received data will be stored.
+/// @param bufferSize Size of the buffer.
+/// @return Result of the operation. See SHUResult enum for possible values.
 SHUResult SHU_ConnectionReceive(const SHUConnection *connection, void *buffer, unsigned long long bufferSize);
 
 #pragma endregion Shunei Declarations
@@ -83,13 +86,32 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, void *buffer, u
 
 #ifdef SHUNEI_IMPLEMENTATION
 
-#ifdef _WIN32
-#else
+#include <stddef.h>
+#include <string.h>
+
+#ifndef _WIN32
 #include <arpa/inet.h>
 #endif
 
-SHUResult SHU_Initialize(void)
+void (*SHUI_AT_EXIT_FUNCTION)(void) = NULL;
+
+#pragma region Shunei Internals
+
+static void SHUI_AT_EXIT(void)
 {
+    if (SHUI_AT_EXIT_FUNCTION != NULL)
+    {
+        SHUI_AT_EXIT_FUNCTION();
+    }
+}
+
+#pragma endregion Shunei Internals
+
+SHUResult SHU_InitializeNetwork(void)
+{
+    SHUI_AT_EXIT_FUNCTION = SHU_TerminateNetwork;
+    atexit(SHUI_AT_EXIT);
+
 #ifdef _WIN32
     WSADATA wsa;
     return (SHUResult)WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -98,8 +120,10 @@ SHUResult SHU_Initialize(void)
 #endif
 }
 
-SHUResult SHU_Terminate(void)
+SHUResult SHU_TerminateNetwork(void)
 {
+    SHUI_AT_EXIT_FUNCTION = NULL;
+
 #ifdef _WIN32
     return (SHUResult)WSACleanup();
 #else
@@ -107,20 +131,71 @@ SHUResult SHU_Terminate(void)
 #endif
 }
 
-SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, SHUConnectionType type, const char *ip, unsigned short port)
+SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, unsigned long long clientCount, const char *ip, unsigned short port)
 {
+    retConnection->fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
+
+#ifdef _WIN32
+    if (retConnection->fileDescriptor == INVALID_SOCKET)
+    {
+        return SHUResult_Err;
+    }
+#else
+    if (retConnection->fileDescriptor < 0)
+    {
+        return SHUResult_Err;
+    }
+#endif
+
+    memset(&retConnection->address, 0, sizeof(retConnection->address));
+    retConnection->address.sin_family = AF_INET;
+    retConnection->address.sin_port = htons(port);
+
+    if (ip == NULL)
+    {
+        retConnection->address.sin_addr.s_addr = INADDR_ANY;
+    }
+    else if (inet_pton(AF_INET, ip, &retConnection->address.sin_addr.s_addr) != 1)
+    {
+        return SHUResult_Err;
+    }
+
+    if (clientCount)
+    {
+        int opt = 1;
+        setsockopt(retConnection->fileDescriptor, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        bind(retConnection->fileDescriptor, (struct sockaddr *)&retConnection->address, sizeof(struct sockaddr_in));
+
+        listen(retConnection->fileDescriptor, SHUM_LISTEN_CONNECTION_QUEUE);
+    }
+    else
+    {
+    }
+
+    return SHUResult_Ok;
 }
 
 SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 {
+    (void)connection;
+    return SHUResult_Ok;
 }
 
 SHUResult SHU_ConnectionSend(const SHUConnection *connection, const void *data, unsigned long long dataSize)
 {
+    (void)connection;
+    (void)data;
+    (void)dataSize;
+    return SHUResult_Ok;
 }
 
 SHUResult SHU_ConnectionReceive(const SHUConnection *connection, void *buffer, unsigned long long bufferSize)
 {
+    (void)connection;
+    (void)buffer;
+    (void)bufferSize;
+    return SHUResult_Ok;
 }
 
 #endif
