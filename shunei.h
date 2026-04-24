@@ -8,6 +8,17 @@
 
 #pragma region Shunei Declarations
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#endif
+
 /// @brief Result values that can be returned by shunei functions.
 typedef enum SHUResult
 {
@@ -24,8 +35,7 @@ typedef enum SHUConnectionType
     SHUConnectionType_PeerJoin,
 } SHUConnectionType;
 
-/// @brief
-/// @note Use only with functions made for this struct, never write manually.
+/// @brief !!! NEVER USE THIS STRUCT STANDALONE, IT IS MADE FOR CONNECTION STRUCT !!!
 typedef struct SHUSocket
 {
     struct sockaddr_in address;
@@ -39,7 +49,7 @@ typedef struct SHUSocket
 } SHUSocket;
 
 /// @brief Struct to hold necessary information for a connection, used for all types of SHUConnectionType types.
-/// @note Use only with functions made for this struct, never write manually.
+/// @note !!! USE ONLY WITH FUNCTIONS MADE FOR THIS STRUCT, NEVER WRITE MANUALLY !!!
 typedef struct SHUConnection
 {
     SHUConnectionType type;
@@ -74,11 +84,7 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, void *buffer, u
 #ifdef SHUNEI_IMPLEMENTATION
 
 #ifdef _WIN32
-#include "winsock2.h"
-#include "ws2tcpip.h"
 #else
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #endif
 
@@ -99,6 +105,22 @@ SHUResult SHU_Terminate(void)
 #else
     return SHUResult_Ok;
 #endif
+}
+
+SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, SHUConnectionType type, const char *ip, unsigned short port)
+{
+}
+
+SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
+{
+}
+
+SHUResult SHU_ConnectionSend(const SHUConnection *connection, const void *data, unsigned long long dataSize)
+{
+}
+
+SHUResult SHU_ConnectionReceive(const SHUConnection *connection, void *buffer, unsigned long long bufferSize)
+{
 }
 
 #endif
