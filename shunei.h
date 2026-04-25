@@ -139,7 +139,7 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, i
                                           (connection)->address.sin_port != 0)
 #endif
 
-void (*SHUI_AT_EXIT_FUNCTION)(void) = NULL;
+static SHUResult (*SHUI_AT_EXIT_FUNCTION)(void) = NULL;
 
 #pragma region Shunei Internals
 
@@ -214,7 +214,7 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
 
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(retConnection->fileDescriptor, FIONBIO, &mode);
+    ioctlsocket(retConnection->fileDescriptor, (long)FIONBIO, &mode);
 #else
     int flags = fcntl(retConnection->fileDescriptor, F_GETFL, 0);
     fcntl(retConnection->fileDescriptor, F_SETFL, flags | O_NONBLOCK);
@@ -227,7 +227,7 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
 
 SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, unsigned short port, SHUConnection *clientConnectionsBuffer, unsigned long long maxClientConnections)
 {
-    if (retListener == NULL || port == 0 || ip == NULL)
+    if (retListener == NULL || port == 0)
     {
         return SHUResult_ErrNullPointer;
     }
@@ -264,7 +264,7 @@ SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip,
 
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(retListener->fileDescriptor, FIONBIO, &mode);
+    ioctlsocket(retListener->fileDescriptor, (long)FIONBIO, &mode);
 #else
     int flags = fcntl(retListener->fileDescriptor, F_GETFL, 0);
     fcntl(retListener->fileDescriptor, F_SETFL, flags | O_NONBLOCK);
