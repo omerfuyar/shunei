@@ -89,12 +89,12 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
 SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, unsigned short port, SHUConnection *clientConnectionsBuffer, unsigned long long maxClientConnections);
 
 /// @brief !!! DO NOT CALL THIS FUNCTION MANUALLY, USE SHU_ConnectionDestroy INSTEAD !!!
-SHUResult SHU_ConnectionDestroyI(SHUConnection *connection);
+SHUResult SHUI_ConnectionDestroy(SHUConnection *connection);
 
 /// @brief Destroys a connection and releases any associated resources. Can be used for both client and listener connections.
 /// @param connection Pointer to the SHUConnection/SHUListener struct representing the connection to be destroyed. Must not be NULL.
 /// @return Result of the operation. See SHUResult for details.
-#define SHU_ConnectionDestroy(connection) SHU_ConnectionDestroyI((SHUConnection *)connection)
+#define SHU_ConnectionDestroy(connection) SHUI_ConnectionDestroy((SHUConnection *)connection)
 
 /// @brief Checks for a waiting client in a listener.
 /// @param listener Listener to check for waiting clients.
@@ -288,7 +288,7 @@ SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip,
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionDestroyI(SHUConnection *connection)
+SHUResult SHUI_ConnectionDestroy(SHUConnection *connection)
 {
     if (connection == NULL)
     {
