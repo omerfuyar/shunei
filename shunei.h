@@ -1,13 +1,21 @@
 #pragma once
 
-#pragma region Shunei Macros
+#ifndef SHU_HEADER
+#ifdef SHU
+#include SHU
+#else
+#include "shu.h"
+#endif
+#endif
+
+#pragma region Macros
 
 #define SHUM_ADDRESS_STRLEN 32
 #define SHUM_LISTEN_CONNECTION_QUEUE 8
 
-#pragma endregion Shunei Macros
+#pragma endregion Macros
 
-#pragma region Shunei Declarations
+#pragma region Declarations
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -19,16 +27,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #endif
-
-/// @brief Result values that can be returned by shunei functions.
-typedef enum SHUResult
-{
-    SHUResult_Ok = 0,
-    SHUResult_Pending,
-    SHUResult_ErrBadStructData,
-    SHUResult_ErrNullPointer,
-    SHUResult_ErrNetwork,
-} SHUResult;
 
 /// @brief Struct to hold necessary information for a client connection.
 /// @note !!! USE ONLY WITH FUNCTIONS MADE FOR THIS STRUCT, NEVER WRITE MANUALLY !!!
@@ -60,7 +58,7 @@ typedef struct SHUListener
 #endif
 
     SHUConnection *clientConnections;
-    unsigned long long clientCount;
+    usz clientCount;
 } SHUListener;
 
 /// @brief Initializes the network subsystem. Must be called before any other shunei function. See SHU_TerminateNetwork for cleanup.
@@ -77,7 +75,7 @@ SHUResult SHU_TerminateNetwork(void);
 /// @param port Port number to connect to.
 /// @return Result of the operation. See SHUResult for details.
 /// @note For server types, this function creates a listening socket bound to the specified IP and port.
-SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, unsigned short port);
+SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, u16 port);
 
 /// @brief Creates and configures a listener connection according to the specified type and parameters.
 /// @param retListener Pointer to a SHUListener struct where the created listener information will be stored. Must not be NULL.
@@ -86,7 +84,7 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
 /// @param clientConnectionsBuffer Buffer to store client connections.
 /// @param maxClientConnections Maximum number of client connections to handle.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, unsigned short port, SHUConnection *clientConnectionsBuffer, unsigned long long maxClientConnections);
+SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections);
 
 /// @brief !!! DO NOT CALL THIS FUNCTION MANUALLY, USE SHU_ConnectionDestroy INSTEAD !!!
 SHUResult SHUI_ConnectionDestroy(SHUConnection *connection);
@@ -106,22 +104,21 @@ SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, int dataSize);
+SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize);
 
 /// @brief Receives data through a connection.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
 /// @return Result of the operation. Pending if there is no data to receive, Ok if data was received successfully. See SHUResult for details.
-SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, int bufferSize);
+SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize);
 
-#pragma endregion Shunei Declarations
+#pragma endregion Declarations
 
-#pragma region Shunei Definitions
+#pragma region Definitions
 
-#ifdef SHUNEI_IMPLEMENTATION
+#ifdef SHU_IMPLEMENTATION
 
-#include <stddef.h>
 #include <string.h>
 #include <errno.h>
 
@@ -139,24 +136,24 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, i
                                           (connection)->address.sin_port != 0)
 #endif
 
-static SHUResult (*SHUI_AT_EXIT_FUNCTION)(void) = NULL;
+static SHUResult (*SHUNEI_AT_EXIT_FUNCTION)(void) = NULL;
 
-#pragma region Shunei Internals
+#pragma region Internals
 
-static void SHUI_AT_EXIT(void)
+static void SHUNEI_AT_EXIT(void)
 {
-    if (SHUI_AT_EXIT_FUNCTION != NULL)
+    if (SHUNEI_AT_EXIT_FUNCTION != NULL)
     {
-        SHUI_AT_EXIT_FUNCTION();
+        SHUNEI_AT_EXIT_FUNCTION();
     }
 }
 
-#pragma endregion Shunei Internals
+#pragma endregion Internals
 
 SHUResult SHU_InitializeNetwork(void)
 {
-    SHUI_AT_EXIT_FUNCTION = SHU_TerminateNetwork;
-    atexit(SHUI_AT_EXIT);
+    SHUNEI_AT_EXIT_FUNCTION = SHU_TerminateNetwork;
+    atexit(SHUNEI_AT_EXIT);
 
 #ifdef _WIN32
     WSADATA wsa;
@@ -168,7 +165,7 @@ SHUResult SHU_InitializeNetwork(void)
 
 SHUResult SHU_TerminateNetwork(void)
 {
-    SHUI_AT_EXIT_FUNCTION = NULL;
+    SHUNEI_AT_EXIT_FUNCTION = NULL;
 
 #ifdef _WIN32
     return (SHUResult)WSACleanup();
@@ -177,7 +174,7 @@ SHUResult SHU_TerminateNetwork(void)
 #endif
 }
 
-SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, unsigned short port)
+SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, u16 port)
 {
     if (retConnection == NULL || port == 0 || ip == NULL)
     {
@@ -225,7 +222,7 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, unsigned short port, SHUConnection *clientConnectionsBuffer, unsigned long long maxClientConnections)
+SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections)
 {
     if (retListener == NULL || port == 0)
     {
@@ -349,7 +346,7 @@ SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, int dataSize)
+SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize)
 {
     if (connection == NULL || data == NULL || dataSize <= 0)
     {
@@ -382,7 +379,7 @@ SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, 
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, int bufferSize)
+SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize)
 {
     if (connection == NULL || buffer == NULL || bufferSize == 0)
     {
@@ -421,4 +418,4 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, i
 
 #endif
 
-#pragma endregion Shunei Definitions
+#pragma endregion Definitions
