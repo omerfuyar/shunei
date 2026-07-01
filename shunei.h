@@ -4,7 +4,7 @@
 #ifdef SHU
 #include SHU
 #else
-#include "shu.h"
+#include "../shu/shu.h"
 #endif
 #endif
 
