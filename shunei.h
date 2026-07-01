@@ -18,9 +18,6 @@
 #pragma region Declarations
 
 #ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -294,7 +291,7 @@ SHUResult SHUI_ConnectionDestroy(SHUConnection *connection)
 
     if (!SHUI_CheckConnection(connection))
     {
-        return SHUResult_ErrBadStructData;
+        return SHUResult_ErrBadData;
     }
 
 #ifdef _WIN32
@@ -317,7 +314,7 @@ SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection
 
     if (!SHUI_CheckConnection(listener))
     {
-        return SHUResult_ErrBadStructData;
+        return SHUResult_ErrBadData;
     }
 
     retClientConnection->addressLength = sizeof(struct sockaddr_in);
@@ -355,10 +352,10 @@ SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, 
 
     if (!SHUI_CheckConnection(connection))
     {
-        return SHUResult_ErrBadStructData;
+        return SHUResult_ErrBadData;
     }
 
-    int bytesSent = send(connection->fileDescriptor, data, dataSize, 0);
+    int bytesSent = send(connection->fileDescriptor, data, (int)dataSize, 0);
 
     if (bytesSent < 0)
     {
@@ -388,10 +385,10 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
 
     if (!SHUI_CheckConnection(connection))
     {
-        return SHUResult_ErrBadStructData;
+        return SHUResult_ErrBadData;
     }
 
-    int bytesReceived = recv(connection->fileDescriptor, buffer, bufferSize, 0);
+    int bytesReceived = recv(connection->fileDescriptor, buffer, (int)bufferSize, 0);
 
     if (bytesReceived < 0)
     {
