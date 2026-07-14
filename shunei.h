@@ -133,15 +133,19 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
                                           (connection)->address.sin_port != 0)
 #endif
 
-static SHUResult (*SHUNEI_AT_EXIT_FUNCTION)(void) = NULL;
-
 #pragma region Internals
 
-static void SHUNEI_AT_EXIT(void)
+static struct
 {
-    if (SHUNEI_AT_EXIT_FUNCTION != NULL)
+    SHUResult (*atExitFunction)(void);
+} SHUNEI = {0};
+
+static void
+SHUNEI_AT_EXIT(void)
+{
+    if (SHUNEI.atExitFunction != NULL)
     {
-        SHUNEI_AT_EXIT_FUNCTION();
+        SHUNEI.atExitFunction();
     }
 }
 
@@ -149,7 +153,7 @@ static void SHUNEI_AT_EXIT(void)
 
 SHUResult SHU_InitializeNetwork(void)
 {
-    SHUNEI_AT_EXIT_FUNCTION = SHU_TerminateNetwork;
+    SHUNEI.atExitFunction = SHU_TerminateNetwork;
     atexit(SHUNEI_AT_EXIT);
 
 #ifdef _WIN32
@@ -162,7 +166,7 @@ SHUResult SHU_InitializeNetwork(void)
 
 SHUResult SHU_TerminateNetwork(void)
 {
-    SHUNEI_AT_EXIT_FUNCTION = NULL;
+    SHUNEI.atExitFunction = NULL;
 
 #ifdef _WIN32
     return (SHUResult)WSACleanup();
