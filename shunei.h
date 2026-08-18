@@ -1,5 +1,7 @@
 #pragma once
 
+// todo proper error checking for socket operations
+
 #ifndef SHU_HEADER
 #ifdef SHU
 #include SHU
@@ -17,6 +19,7 @@
 
 #pragma region Declarations
 
+// todo maybe move these to implementation
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -44,16 +47,7 @@ typedef struct SHUConnection
 /// @note !!! USE ONLY WITH FUNCTIONS MADE FOR THIS STRUCT, NEVER WRITE MANUALLY !!!
 typedef struct SHUListener
 {
-    struct sockaddr_in address;
-
-#ifdef _WIN32
-    SOCKET fileDescriptor;
-    int addressLength;
-#else
-    int fileDescriptor;
-    socklen_t addressLength;
-#endif
-
+    SHUConnection connection;
     SHUConnection *clientConnections;
     usz clientCount;
 } SHUListener;
@@ -72,7 +66,7 @@ SHUResult SHU_TerminateNetwork(void);
 /// @param port Port number to connect to.
 /// @return Result of the operation. See SHUResult for details.
 /// @note For server types, this function creates a listening socket bound to the specified IP and port.
-SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, u16 port);
+SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16 port);
 
 /// @brief Creates and configures a listener connection according to the specified type and parameters.
 /// @param retListener Pointer to a SHUListener struct where the created listener information will be stored. Must not be NULL.
@@ -81,20 +75,29 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
 /// @param clientConnectionsBuffer Buffer to store client connections.
 /// @param maxClientConnections Maximum number of client connections to handle.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections);
+SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections);
 
-/// @brief !!! DO NOT CALL THIS FUNCTION MANUALLY, USE SHU_ConnectionDestroy INSTEAD !!!
-SHUResult SHUI_ConnectionDestroy(SHUConnection *connection);
-
-/// @brief Destroys a connection and releases any associated resources. Can be used for both client and listener connections.
-/// @param connection Pointer to the SHUConnection/SHUListener struct representing the connection to be destroyed. Must not be NULL.
+/// @brief Destroys a connection and releases any associated resources.
+/// @param connection Pointer to the SHUConnection to be destroyed.
 /// @return Result of the operation. See SHUResult for details.
-#define SHU_ConnectionDestroy(connection) SHUI_ConnectionDestroy((SHUConnection *)connection)
+SHUResult SHU_ConnectionDestroy(SHUConnection *connection);
+
+/// @brief Destroys a listener connection and releases any associated resources.
+/// @param connection Pointer to the SHUListener to be destroyed.
+/// @return Result of the operation. See SHUResult for details.
+SHUResult SHU_ListenerDestroy(SHUListener *listener);
 
 /// @brief Checks for a waiting client in a listener.
 /// @param listener Listener to check for waiting clients.
+/// @param retClientConnection Client connection that is connected to this listener if so.
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
-SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection *retClientConnection);
+SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection);
+
+/// @brief Checks for a waiting client in a listener.
+/// @param listener Listener to wait for clients.
+/// @param retClientConnection
+/// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
+SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClientConnection);
 
 /// @brief Sends data through a connection.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
@@ -103,12 +106,26 @@ SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection
 /// @return Result of the operation. See SHUResult for details.
 SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize);
 
+/// @brief Sends data through a connection, blocking until all of it has been sent.
+/// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
+/// @param data Pointer to the data to send.
+/// @param dataSize Size of the data to send.
+/// @return Result of the operation. See SHUResult for details.
+SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *data, usz dataSize);
+
 /// @brief Receives data through a connection.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
 /// @return Result of the operation. Pending if there is no data to receive, Ok if data was received successfully. See SHUResult for details.
 SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize);
+
+/// @brief Receives data through a connection, blocking until at least some data has been received.
+/// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
+/// @param buffer Pointer to the buffer where received data will be stored.
+/// @param bufferSize Size of the buffer.
+/// @return Result of the operation. See SHUResult for details.
+SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffer, usz bufferSize);
 
 #pragma endregion Declarations
 
@@ -120,18 +137,45 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
 #include <errno.h>
 
 #ifdef _WIN32
-#define SHUI_CheckConnection(connection) ((connection)->fileDescriptor != INVALID_SOCKET && \
-                                          (connection)->addressLength > 0 &&                \
-                                          (connection)->address.sin_family == AF_INET &&    \
-                                          (connection)->address.sin_port != 0)
+#define SHUI_CheckSocket(socket) (socket != INVALID_SOCKET)
 #else
 #include <fcntl.h>
 #include <arpa/inet.h>
-#define SHUI_CheckConnection(connection) ((connection)->fileDescriptor >= 0 &&           \
-                                          (connection)->addressLength > 0 &&             \
-                                          (connection)->address.sin_family == AF_INET && \
-                                          (connection)->address.sin_port != 0)
+#include <sys/select.h>
+#define SHUI_CheckSocket(socket) (socket >= 0)
 #endif
+
+/// @brief Blocks until the given socket is ready for the requested operation (reading or writing).
+/// @param fileDescriptor Socket to wait on.
+/// @param forWrite If true, waits until the socket is writable; otherwise waits until it is readable.
+/// @return SHUResult_Ok once the socket is ready, SHUResult_ErrNetwork on failure.
+static SHUResult SHUI_WaitReady(
+#ifdef _WIN32
+    SOCKET fileDescriptor,
+#else
+    int fileDescriptor,
+#endif
+    bool forWrite)
+{
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(fileDescriptor, &fds);
+
+    int selectResult = select((int)(fileDescriptor + 1), forWrite ? NULL : &fds, forWrite ? &fds : NULL, NULL, NULL);
+
+    if (selectResult < 0)
+    {
+        return SHUResult_ErrNetwork;
+    }
+
+    return SHUResult_Ok;
+}
+
+#define SHUI_CheckPanicConnection(connection) SHU_Assert(SHUI_CheckSocket((connection)->fileDescriptor) &&  \
+                                                             (connection)->addressLength > 0 &&             \
+                                                             (connection)->address.sin_family == AF_INET && \
+                                                             (connection)->address.sin_port != 0,           \
+                                                         "Connection " #connection " is invalid.")
 
 #pragma region Internals
 
@@ -140,8 +184,7 @@ static struct
     SHUResult (*atExitFunction)(void);
 } SHUNEI = {0};
 
-static void
-SHUNEI_AT_EXIT(void)
+static void SHUNEI_AT_EXIT(void)
 {
     if (SHUNEI.atExitFunction != NULL)
     {
@@ -175,12 +218,10 @@ SHUResult SHU_TerminateNetwork(void)
 #endif
 }
 
-SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *ip, u16 port)
+SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16 port)
 {
-    if (retConnection == NULL || port == 0 || ip == NULL)
-    {
-        return SHUResult_ErrNullPointer;
-    }
+    SHU_CheckPanicNullPointer(retConnection);
+    SHU_CheckPanicNullPointer(ip);
 
     retConnection->fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -223,85 +264,81 @@ SHUResult SHU_ConnectionCreateClient(SHUConnection *retConnection, const char *i
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionCreateListener(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections)
+SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections)
 {
-    if (retListener == NULL || port == 0)
-    {
-        return SHUResult_ErrNullPointer;
-    }
+    SHU_CheckPanicNullPointer(retListener);
 
     retListener->clientConnections = clientConnectionsBuffer;
     retListener->clientCount = maxClientConnections;
 
-    retListener->fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
+    retListener->connection.fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
 
 #ifdef _WIN32
-    if (retListener->fileDescriptor == INVALID_SOCKET)
+    if (retListener->connection.fileDescriptor == INVALID_SOCKET)
     {
         return SHUResult_ErrNetwork;
     }
 #else
-    if (retListener->fileDescriptor < 0)
+    if (retListener->connection.fileDescriptor < 0)
     {
         return SHUResult_ErrNetwork;
     }
 #endif
 
-    memset(&retListener->address, 0, sizeof(retListener->address));
-    retListener->address.sin_family = AF_INET;
-    retListener->address.sin_port = htons(port);
+    memset(&retListener->connection.address, 0, sizeof(retListener->connection.address));
+    retListener->connection.address.sin_family = AF_INET;
+    retListener->connection.address.sin_port = htons(port);
 
     if (ip == NULL)
     {
-        retListener->address.sin_addr.s_addr = INADDR_ANY;
+        retListener->connection.address.sin_addr.s_addr = INADDR_ANY;
     }
-    else if (inet_pton(AF_INET, ip, &retListener->address.sin_addr.s_addr) != 1)
+    else if (inet_pton(AF_INET, ip, &retListener->connection.address.sin_addr.s_addr) != 1)
     {
         return SHUResult_ErrNetwork;
     }
 
 #ifdef _WIN32
     u_long mode = 1;
-    ioctlsocket(retListener->fileDescriptor, (long)FIONBIO, &mode);
+    ioctlsocket(retListener->connection.fileDescriptor, (long)FIONBIO, &mode);
 #else
-    int flags = fcntl(retListener->fileDescriptor, F_GETFL, 0);
-    fcntl(retListener->fileDescriptor, F_SETFL, flags | O_NONBLOCK);
+    int flags = fcntl(retListener->connection.fileDescriptor, F_GETFL, 0);
+    fcntl(retListener->connection.fileDescriptor, F_SETFL, flags | O_NONBLOCK);
 #endif
 
     int opt = 1;
-    setsockopt(retListener->fileDescriptor, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+    setsockopt(retListener->connection.fileDescriptor, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
-    if (bind(retListener->fileDescriptor, (struct sockaddr *)&retListener->address, sizeof(struct sockaddr_in)) < 0)
+    if (bind(retListener->connection.fileDescriptor, (struct sockaddr *)&retListener->connection.address, sizeof(struct sockaddr_in)) < 0)
     {
         return SHUResult_ErrNetwork;
     }
 
-    if (listen(retListener->fileDescriptor, SHUM_LISTEN_CONNECTION_QUEUE) < 0)
+    if (listen(retListener->connection.fileDescriptor, SHUM_LISTEN_CONNECTION_QUEUE) < 0)
     {
         return SHUResult_ErrNetwork;
     }
 
-    retListener->addressLength = sizeof(struct sockaddr_in);
+    retListener->connection.addressLength = sizeof(struct sockaddr_in);
 
     return SHUResult_Ok;
 }
 
-SHUResult SHUI_ConnectionDestroy(SHUConnection *connection)
+SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 {
-    if (connection == NULL)
-    {
-        return SHUResult_ErrNullPointer;
-    }
-
-    if (!SHUI_CheckConnection(connection))
-    {
-        return SHUResult_ErrBadData;
-    }
+    SHU_CheckPanicNullPointer(connection);
+    SHUI_CheckPanicConnection(connection);
 
 #ifdef _WIN32
-    closesocket(connection->fileDescriptor);
+    if (closesocket(connection->fileDescriptor))
+    {
+        return SHUResult_ErrInternal;
+    }
 #else
-    close(connection->fileDescriptor);
+    if (close(connection->fileDescriptor))
+    {
+        return SHUResult_ErrInternal;
+    }
 #endif
 
     memset(connection, 0x00, sizeof(SHUConnection));
@@ -309,20 +346,29 @@ SHUResult SHUI_ConnectionDestroy(SHUConnection *connection)
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection *retClientConnection)
+SHUResult SHU_ListenerDestroy(SHUListener *listener)
 {
-    if (listener == NULL || retClientConnection == NULL)
+    SHUResult result = SHU_ConnectionDestroy(&listener->connection);
+
+    if (!result)
     {
-        return SHUResult_ErrNullPointer;
+        return result;
     }
 
-    if (!SHUI_CheckConnection(listener))
-    {
-        return SHUResult_ErrBadData;
-    }
+    listener->clientConnections = NULL;
+    listener->clientCount = 0;
+
+    return SHUResult_Ok;
+}
+
+SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection)
+{
+    SHU_CheckPanicNullPointer(listener);
+    SHU_CheckPanicNullPointer(retClientConnection);
+    SHUI_CheckPanicConnection(&listener->connection);
 
     retClientConnection->addressLength = sizeof(struct sockaddr_in);
-    retClientConnection->fileDescriptor = accept(listener->fileDescriptor, (struct sockaddr *)&retClientConnection->address, &retClientConnection->addressLength);
+    retClientConnection->fileDescriptor = accept(listener->connection.fileDescriptor, (struct sockaddr *)&retClientConnection->address, &retClientConnection->addressLength);
 
 #ifdef _WIN32
     if (retClientConnection->fileDescriptor == INVALID_SOCKET)
@@ -347,17 +393,27 @@ SHUResult SHU_ConnectionCheckListener(const SHUListener *listener, SHUConnection
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize)
+SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClientConnection)
 {
-    if (connection == NULL || data == NULL || dataSize <= 0)
+    SHU_CheckPanicNullPointer(listener);
+    SHU_CheckPanicNullPointer(retClientConnection);
+    SHUI_CheckPanicConnection(&listener->connection);
+
+    SHUResult waitResult = SHUI_WaitReady(listener->connection.fileDescriptor, false);
+
+    if (waitResult)
     {
-        return SHUResult_ErrNullPointer;
+        return waitResult;
     }
 
-    if (!SHUI_CheckConnection(connection))
-    {
-        return SHUResult_ErrBadData;
-    }
+    return SHU_ListenerCheck(listener, retClientConnection);
+}
+
+SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize)
+{
+    SHU_CheckPanicNullPointer(connection);
+    SHU_CheckPanicNullPointer(data);
+    SHUI_CheckPanicConnection(connection);
 
     int bytesSent = send(connection->fileDescriptor, data, (int)dataSize, 0);
 
@@ -380,17 +436,52 @@ SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, 
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize)
+SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *data, usz dataSize)
 {
-    if (connection == NULL || buffer == NULL || bufferSize == 0)
+    SHU_CheckPanicNullPointer(connection);
+    SHU_CheckPanicNullPointer(data);
+    SHUI_CheckPanicConnection(connection);
+
+    usz totalSent = 0;
+
+    while (totalSent < dataSize)
     {
-        return SHUResult_ErrNullPointer;
+        SHUResult waitResult = SHUI_WaitReady(connection->fileDescriptor, true);
+
+        if (waitResult)
+        {
+            return waitResult;
+        }
+
+        int bytesSent = send(connection->fileDescriptor, data + totalSent, (int)(dataSize - totalSent), 0);
+
+        if (bytesSent < 0)
+        {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK)
+            {
+                continue;
+            }
+#else
+            if (errno == EWOULDBLOCK || errno == EAGAIN)
+            {
+                continue;
+            }
+#endif
+            return SHUResult_ErrNetwork;
+        }
+
+        totalSent += (usz)bytesSent;
     }
 
-    if (!SHUI_CheckConnection(connection))
-    {
-        return SHUResult_ErrBadData;
-    }
+    return SHUResult_Ok;
+}
+
+SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize)
+{
+    SHU_CheckPanicNullPointer(connection);
+    SHU_CheckPanicNullPointer(buffer);
+    SHUI_CheckPanicConnection(connection);
 
     int bytesReceived = recv(connection->fileDescriptor, buffer, (int)bufferSize, 0);
 
@@ -415,6 +506,22 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
     }
 
     return SHUResult_Ok;
+}
+
+SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffer, usz bufferSize)
+{
+    SHU_CheckPanicNullPointer(connection);
+    SHU_CheckPanicNullPointer(buffer);
+    SHUI_CheckPanicConnection(connection);
+
+    SHUResult waitResult = SHUI_WaitReady(connection->fileDescriptor, false);
+
+    if (waitResult)
+    {
+        return waitResult;
+    }
+
+    return SHU_ConnectionReceive(connection, buffer, bufferSize);
 }
 
 #endif
