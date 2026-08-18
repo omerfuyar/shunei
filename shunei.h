@@ -93,7 +93,7 @@ SHUResult SHU_ListenerDestroy(SHUListener *listener);
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
 SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection);
 
-/// @brief Checks for a waiting client in a listener.
+/// @brief Waits for a client to connect.
 /// @param listener Listener to wait for clients.
 /// @param retClientConnection
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
@@ -145,32 +145,6 @@ SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffe
 #define SHUI_CheckSocket(socket) (socket >= 0)
 #endif
 
-/// @brief Blocks until the given socket is ready for the requested operation (reading or writing).
-/// @param fileDescriptor Socket to wait on.
-/// @param forWrite If true, waits until the socket is writable; otherwise waits until it is readable.
-/// @return SHUResult_Ok once the socket is ready, SHUResult_ErrNetwork on failure.
-static SHUResult SHUI_WaitReady(
-#ifdef _WIN32
-    SOCKET fileDescriptor,
-#else
-    int fileDescriptor,
-#endif
-    bool forWrite)
-{
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(fileDescriptor, &fds);
-
-    int selectResult = select((int)(fileDescriptor + 1), forWrite ? NULL : &fds, forWrite ? &fds : NULL, NULL, NULL);
-
-    if (selectResult < 0)
-    {
-        return SHUResult_ErrNetwork;
-    }
-
-    return SHUResult_Ok;
-}
-
 #define SHUI_CheckPanicConnection(connection) SHU_Assert(SHUI_CheckSocket((connection)->fileDescriptor) &&  \
                                                              (connection)->addressLength > 0 &&             \
                                                              (connection)->address.sin_family == AF_INET && \
@@ -220,8 +194,8 @@ SHUResult SHU_TerminateNetwork(void)
 
 SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16 port)
 {
-    SHU_CheckPanicNullPointer(retConnection);
-    SHU_CheckPanicNullPointer(ip);
+    SHU_AssertNullPointer(retConnection);
+    SHU_AssertNullPointer(ip);
 
     retConnection->fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -266,7 +240,7 @@ SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16
 
 SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections)
 {
-    SHU_CheckPanicNullPointer(retListener);
+    SHU_AssertNullPointer(retListener);
 
     retListener->clientConnections = clientConnectionsBuffer;
     retListener->clientCount = maxClientConnections;
@@ -326,7 +300,7 @@ SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port,
 
 SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 {
-    SHU_CheckPanicNullPointer(connection);
+    SHU_AssertNullPointer(connection);
     SHUI_CheckPanicConnection(connection);
 
 #ifdef _WIN32
@@ -348,12 +322,7 @@ SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 
 SHUResult SHU_ListenerDestroy(SHUListener *listener)
 {
-    SHUResult result = SHU_ConnectionDestroy(&listener->connection);
-
-    if (!result)
-    {
-        return result;
-    }
+    SHU_CheckReturn(SHU_ConnectionDestroy(&listener->connection));
 
     listener->clientConnections = NULL;
     listener->clientCount = 0;
@@ -363,8 +332,8 @@ SHUResult SHU_ListenerDestroy(SHUListener *listener)
 
 SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection)
 {
-    SHU_CheckPanicNullPointer(listener);
-    SHU_CheckPanicNullPointer(retClientConnection);
+    SHU_AssertNullPointer(listener);
+    SHU_AssertNullPointer(retClientConnection);
     SHUI_CheckPanicConnection(&listener->connection);
 
     retClientConnection->addressLength = sizeof(struct sockaddr_in);
@@ -395,15 +364,19 @@ SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClien
 
 SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClientConnection)
 {
-    SHU_CheckPanicNullPointer(listener);
-    SHU_CheckPanicNullPointer(retClientConnection);
+    SHU_AssertNullPointer(listener);
+    SHU_AssertNullPointer(retClientConnection);
     SHUI_CheckPanicConnection(&listener->connection);
 
-    SHUResult waitResult = SHUI_WaitReady(listener->connection.fileDescriptor, false);
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(listener->connection.fileDescriptor, &fds);
 
-    if (waitResult)
+    int selectResult = select((int)(listener->connection.fileDescriptor + 1), &fds, NULL, NULL, NULL);
+
+    if (selectResult < 0)
     {
-        return waitResult;
+        return SHUResult_ErrNetwork;
     }
 
     return SHU_ListenerCheck(listener, retClientConnection);
@@ -411,8 +384,8 @@ SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClient
 
 SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize)
 {
-    SHU_CheckPanicNullPointer(connection);
-    SHU_CheckPanicNullPointer(data);
+    SHU_AssertNullPointer(connection);
+    SHU_AssertNullPointer(data);
     SHUI_CheckPanicConnection(connection);
 
     int bytesSent = send(connection->fileDescriptor, data, (int)dataSize, 0);
@@ -438,19 +411,23 @@ SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, 
 
 SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *data, usz dataSize)
 {
-    SHU_CheckPanicNullPointer(connection);
-    SHU_CheckPanicNullPointer(data);
+    SHU_AssertNullPointer(connection);
+    SHU_AssertNullPointer(data);
     SHUI_CheckPanicConnection(connection);
 
     usz totalSent = 0;
 
     while (totalSent < dataSize)
     {
-        SHUResult waitResult = SHUI_WaitReady(connection->fileDescriptor, true);
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(connection->fileDescriptor, &fds);
 
-        if (waitResult)
+        int selectResult = select((int)(connection->fileDescriptor + 1), NULL, &fds, NULL, NULL);
+
+        if (selectResult < 0)
         {
-            return waitResult;
+            return SHUResult_ErrNetwork;
         }
 
         int bytesSent = send(connection->fileDescriptor, data + totalSent, (int)(dataSize - totalSent), 0);
@@ -479,8 +456,8 @@ SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *da
 
 SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize)
 {
-    SHU_CheckPanicNullPointer(connection);
-    SHU_CheckPanicNullPointer(buffer);
+    SHU_AssertNullPointer(connection);
+    SHU_AssertNullPointer(buffer);
     SHUI_CheckPanicConnection(connection);
 
     int bytesReceived = recv(connection->fileDescriptor, buffer, (int)bufferSize, 0);
@@ -510,15 +487,19 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
 
 SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffer, usz bufferSize)
 {
-    SHU_CheckPanicNullPointer(connection);
-    SHU_CheckPanicNullPointer(buffer);
+    SHU_AssertNullPointer(connection);
+    SHU_AssertNullPointer(buffer);
     SHUI_CheckPanicConnection(connection);
 
-    SHUResult waitResult = SHUI_WaitReady(connection->fileDescriptor, false);
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(connection->fileDescriptor, &fds);
 
-    if (waitResult)
+    int selectResult = select((int)(connection->fileDescriptor + 1), &fds, NULL, NULL, NULL);
+
+    if (selectResult < 0)
     {
-        return waitResult;
+        return SHUResult_ErrNetwork;
     }
 
     return SHU_ConnectionReceive(connection, buffer, bufferSize);
