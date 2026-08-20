@@ -48,8 +48,10 @@ typedef struct SHUConnection
 typedef struct SHUListener
 {
     SHUConnection connection;
+
     SHUConnection *clientConnections;
     usz clientCount;
+    usz clientCapacity;
 } SHUListener;
 
 /// @brief Initializes the network subsystem. Must be called before any other shunei function. See SHU_TerminateNetwork for cleanup.
@@ -89,43 +91,45 @@ SHUResult SHU_ListenerDestroy(SHUListener *listener);
 
 /// @brief Checks for a waiting client in a listener.
 /// @param listener Listener to check for waiting clients.
-/// @param retClientConnection Client connection that is connected to this listener if so.
+/// @param retClientConnection pointer to the client connection that is connected to this listener if so.
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
-SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection);
+SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConnection);
 
 /// @brief Waits for a client to connect.
 /// @param listener Listener to wait for clients.
-/// @param retClientConnection
+/// @param retClientConnection pointer to the client connection that is connected to this listener if so.
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
-SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClientConnection);
+SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConnection);
 
 /// @brief Sends data through a connection.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
+/// @param retSentSize Bytes sent in this batch. Leave NULL if not needed.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize);
+SHUResult SHU_ConnectionSend(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
 
 /// @brief Sends data through a connection, blocking until all of it has been sent.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *data, usz dataSize);
+SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize);
 
 /// @brief Receives data through a connection.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
+/// @param retReceivedSize Bytes received in this batch. Leave NULL if not needed.
 /// @return Result of the operation. Pending if there is no data to receive, Ok if data was received successfully. See SHUResult for details.
-SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize);
+SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
 
 /// @brief Receives data through a connection, blocking until at least some data has been received.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffer, usz bufferSize);
+SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize);
 
 #pragma endregion Declarations
 
@@ -175,10 +179,14 @@ SHUResult SHU_InitializeNetwork(void)
 
 #ifdef _WIN32
     WSADATA wsa;
-    return (SHUResult)WSAStartup(MAKEWORD(2, 2), &wsa);
-#else
-    return SHUResult_Ok;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (result)
+    {
+        return SHUResult_ErrNetwork;
+    }
 #endif
+
+    return SHUResult_Ok;
 }
 
 SHUResult SHU_TerminateNetwork(void)
@@ -186,10 +194,14 @@ SHUResult SHU_TerminateNetwork(void)
     SHUNEI.atExitFunction = NULL;
 
 #ifdef _WIN32
-    return (SHUResult)WSACleanup();
-#else
-    return SHUResult_Ok;
+    int result = WSACleanup();
+    if (result)
+    {
+        return SHUResult_ErrNetwork;
+    }
 #endif
+
+    return SHUResult_Ok;
 }
 
 SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16 port)
@@ -243,7 +255,8 @@ SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port,
     SHU_AssertNullPointer(retListener);
 
     retListener->clientConnections = clientConnectionsBuffer;
-    retListener->clientCount = maxClientConnections;
+    retListener->clientCapacity = maxClientConnections;
+    retListener->clientCount = 0;
 
     retListener->connection.fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -306,12 +319,12 @@ SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 #ifdef _WIN32
     if (closesocket(connection->fileDescriptor))
     {
-        return SHUResult_ErrInternal;
+        return SHUResult_ErrNetwork;
     }
 #else
     if (close(connection->fileDescriptor))
     {
-        return SHUResult_ErrInternal;
+        return SHUResult_ErrNetwork;
     }
 #endif
 
@@ -326,21 +339,29 @@ SHUResult SHU_ListenerDestroy(SHUListener *listener)
 
     listener->clientConnections = NULL;
     listener->clientCount = 0;
+    listener->clientCapacity = 0;
 
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClientConnection)
+SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConnection)
 {
     SHU_AssertNullPointer(listener);
     SHU_AssertNullPointer(retClientConnection);
     SHUI_CheckPanicConnection(&listener->connection);
 
-    retClientConnection->addressLength = sizeof(struct sockaddr_in);
-    retClientConnection->fileDescriptor = accept(listener->connection.fileDescriptor, (struct sockaddr *)&retClientConnection->address, &retClientConnection->addressLength);
+    if (listener->clientCount >= listener->clientCapacity)
+    {
+        return SHUResult_ErrIndexOutOfBounds;
+    }
+
+    SHUConnection *connection = listener->clientConnections + listener->clientCount;
+
+    connection->addressLength = sizeof(struct sockaddr_in);
+    connection->fileDescriptor = accept(listener->connection.fileDescriptor, (struct sockaddr *)&connection->address, &connection->addressLength);
 
 #ifdef _WIN32
-    if (retClientConnection->fileDescriptor == INVALID_SOCKET)
+    if (connection->fileDescriptor == INVALID_SOCKET)
     {
         if (WSAGetLastError() == WSAEWOULDBLOCK)
         {
@@ -349,7 +370,7 @@ SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClien
         return SHUResult_ErrNetwork;
     }
 #else
-    if (retClientConnection->fileDescriptor < 0)
+    if (connection->fileDescriptor < 0)
     {
         if (errno == EWOULDBLOCK || errno == EAGAIN)
         {
@@ -359,10 +380,13 @@ SHUResult SHU_ListenerCheck(const SHUListener *listener, SHUConnection *retClien
     }
 #endif
 
+    *retClientConnection = connection;
+    listener->clientCount++;
+
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClientConnection)
+SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConnection)
 {
     SHU_AssertNullPointer(listener);
     SHU_AssertNullPointer(retClientConnection);
@@ -382,7 +406,7 @@ SHUResult SHU_ListenerWait(const SHUListener *listener, SHUConnection *retClient
     return SHU_ListenerCheck(listener, retClientConnection);
 }
 
-SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, usz dataSize)
+SHUResult SHU_ConnectionSend(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(data);
@@ -406,10 +430,15 @@ SHUResult SHU_ConnectionSend(const SHUConnection *connection, const char *data, 
         return SHUResult_ErrNetwork;
     }
 
+    if (retSentSize != NULL)
+    {
+        *retSentSize = bytesSent;
+    }
+
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *data, usz dataSize)
+SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(data);
@@ -454,7 +483,7 @@ SHUResult SHU_ConnectionSendWait(const SHUConnection *connection, const char *da
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, usz bufferSize)
+SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(buffer);
@@ -477,15 +506,16 @@ SHUResult SHU_ConnectionReceive(const SHUConnection *connection, char *buffer, u
 #endif
         return SHUResult_ErrNetwork;
     }
-    else if (bytesReceived == 0)
+
+    if (retReceivedSize != NULL)
     {
-        return SHUResult_ErrNetwork;
+        *retReceivedSize = (usz)bytesReceived;
     }
 
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffer, usz bufferSize)
+SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(buffer);
@@ -502,7 +532,7 @@ SHUResult SHU_ConnectionReceiveWait(const SHUConnection *connection, char *buffe
         return SHUResult_ErrNetwork;
     }
 
-    return SHU_ConnectionReceive(connection, buffer, bufferSize);
+    return SHU_ConnectionReceive(connection, buffer, bufferSize, NULL);
 }
 
 #endif
