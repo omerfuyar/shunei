@@ -54,7 +54,7 @@ int main(void)
             usz toSend = SHUMin(remaining, SHUM_CHUNK_SIZE);
             usz sent = 0;
 
-            SHUResult result = SHU_ConnectionSendSplit(&client, payload + sendOffset, toSend, &sent);
+            SHUResult result = SHU_ConnectionSendSplit(&client, csv(cs(payload + sendOffset, toSend)), &sent);
             sendFrames++;
 
             if (result == SHUResult_Ok) // sent a batch
@@ -71,7 +71,7 @@ int main(void)
         if (receiveOffset < SHUM_PAYLOAD_SIZE) // client side
         {
             usz received = 0;
-            SHUResult result = SHU_ConnectionReceiveSplit(serverSide, receiveChunk, sizeof(receiveChunk), &received);
+            SHUResult result = SHU_ConnectionReceiveSplit(serverSide, cs(receiveChunk, sizeof(receiveChunk)), &received);
             receiveFrames++;
 
             if (result == SHUResult_Ok) // received

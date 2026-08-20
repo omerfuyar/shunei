@@ -26,12 +26,12 @@ int main(void)
     // client sends, blocking until it's all gone out
     const char *message = "hello from client";
     usz messageSize = strlen(message) + 1;
-    SHU_CheckPanic(SHU_ConnectionSendWait(&client, message, messageSize, NULL));
+    SHU_CheckPanic(SHU_ConnectionSendWait(&client, csv(cs((void *)message, messageSize)), NULL));
 
     // server receives, blocking until the buffer is full
     char buffer[128] = {0};
     usz receivedSize = 0;
-    SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSideClient, buffer, messageSize, &receivedSize));
+    SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSideClient, cs(buffer, messageSize), &receivedSize));
 
     SHU_LogInfo("Server received %zu out of %zu bytes: %s", receivedSize, messageSize, buffer);
 
