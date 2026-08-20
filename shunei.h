@@ -62,20 +62,19 @@ SHUResult SHU_InitializeNetwork(void);
 /// @return Result of the operation. See SHUResult for details.
 SHUResult SHU_TerminateNetwork(void);
 
-/// @brief Creates and configures a client connection according to the specified type and parameters.
+/// @brief Creates and configures a client connection to the specified ip and port.
 /// @param retConnection Pointer to a SHUConnection struct where the created connection information will be stored. Must not be NULL.
-/// @param ip IP address to connect to, depending on the connection type.
+/// @param ip IP address to connect to. Must not be NULL.
 /// @param port Port number to connect to.
 /// @return Result of the operation. See SHUResult for details.
-/// @note For server types, this function creates a listening socket bound to the specified IP and port.
 SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16 port);
 
-/// @brief Creates and configures a listener connection according to the specified type and parameters.
+/// @brief Creates and configures a listener connection with the specified parameters.
 /// @param retListener Pointer to a SHUListener struct where the created listener information will be stored. Must not be NULL.
-/// @param ip IP address to bind to, depending on the connection type. Can be NULL to bind to all interfaces.
+/// @param ip IP address to bind to. Can be NULL to bind to all interfaces.
 /// @param port Port number to bind to.
-/// @param clientConnectionsBuffer Buffer to store client connections.
-/// @param maxClientConnections Maximum number of client connections to handle.
+/// @param clientConnectionsBuffer Buffer to store client connections. Cannot be NULL.
+/// @param maxClientConnections Maximum number of client connections active at the same time. Slots freed with SHU_ListenerReleaseClient can be reused.
 /// @return Result of the operation. See SHUResult for details.
 SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections);
 
@@ -85,21 +84,28 @@ SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port,
 SHUResult SHU_ConnectionDestroy(SHUConnection *connection);
 
 /// @brief Destroys a listener connection and releases any associated resources.
-/// @param connection Pointer to the SHUListener to be destroyed.
+/// @param listener Pointer to the SHUListener to be destroyed.
 /// @return Result of the operation. See SHUResult for details.
+/// @note Does not destroy any client connections previously accepted through this listener. Release those separately with SHU_ListenerReleaseClient first.
 SHUResult SHU_ListenerDestroy(SHUListener *listener);
 
 /// @brief Checks for a waiting client in a listener.
 /// @param listener Listener to check for waiting clients.
-/// @param retClientConnection pointer to the client connection that is connected to this listener if so.
-/// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
-SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConnection);
+/// @param retClientConnection pointer to the client connection that is connected to this listener if so. Must not be NULL.
+/// @return Result of the operation. Pending if there is no connecting clients, Ok if a client was accepted, ErrIndexOutOfBounds if the listener's client buffer is already full. See SHUResult for details.
+SHUWUR SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConnection);
 
 /// @brief Waits for a client to connect.
 /// @param listener Listener to wait for clients.
-/// @param retClientConnection pointer to the client connection that is connected to this listener if so.
-/// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
+/// @param retClientConnection pointer to the client connection that is connected to this listener if so. Must not be NULL.
+/// @return Result of the operation. Ok once a client has been accepted, ErrIndexOutOfBounds if the listener's client buffer is already full. See SHUResult for details.
 SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConnection);
+
+/// @brief Releases a client connection previously accepted through SHU_ListenerCheck or SHU_ListenerWait, closing it and freeing its slot for reuse by a future accept.
+/// @param listener Listener that accepted connection. Must not be NULL.
+/// @param connection Client connection to release. Must have been accepted through this listener. Must not be NULL.
+/// @return Result of the operation. See SHUResult for details.
+SHUResult SHU_ListenerReleaseClient(SHUListener *listener, SHUConnection *connection);
 
 /// @brief Attempts to send data through a connection without blocking.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
@@ -108,13 +114,13 @@ SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConne
 /// @param retSentSize Bytes actually sent by this call, which may be less than dataSize. Leave NULL if not needed.
 /// @return Result of the operation. Pending if the socket cannot accept any data right now, Ok if at least one byte was sent. See SHUResult for details.
 /// @note It may only send part of dataSize. Check retSentSize even on SHUResult_Ok and call again with the remaining data (data + *retSentSize, dataSize - *retSentSize) until it has all gone out.
-SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
+SHUWUR SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
 
 /// @brief Sends data through a connection, blocking until all of it has been sent.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
-/// @param retReceivedSize Bytes actually sent. Leave NULL if not needed.
+/// @param retSentSize Bytes actually sent. Leave NULL if not needed.
 /// @return Result of the operation. See SHUResult for details.
 SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
 
@@ -125,7 +131,7 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, us
 /// @param retReceivedSize Bytes actually received by this call, which may be less than bufferSize. Leave NULL if not needed.
 /// @return Result of the operation. Pending if there is no data to receive yet, Ok if at least one byte was received, Err if the peer closed the connection. See SHUResult for details.
 /// @note It may only fill part of bufferSize. Check retReceivedSize on SHUResult_Ok and call again to receive the rest.
-SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
+SHUWUR SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
 
 /// @brief Receives data through a connection, blocking until the buffer is completely filled or the
 /// peer closes the connection, whichever happens first.
@@ -154,6 +160,16 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz
 #define SHUI_CheckSocket(socket) (socket >= 0)
 #endif
 
+// send() must never be allowed to raise SIGPIPE on a broken connection; it should report
+// SHUResult_ErrNetwork like any other socket error instead. MSG_NOSIGNAL (Linux) and
+// SO_NOSIGPIPE (macOS/BSD, applied per-socket in SHUI_DisableSigPipe) cover this without
+// touching process-wide signal disposition. Neither exists on Windows, which has no SIGPIPE.
+#ifdef MSG_NOSIGNAL
+#define SHUI_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define SHUI_SEND_FLAGS 0
+#endif
+
 #define SHUI_CheckPanicConnection(connection) SHU_Assert(SHUI_CheckSocket((connection)->fileDescriptor) &&  \
                                                              (connection)->addressLength > 0 &&             \
                                                              (connection)->address.sin_family == AF_INET && \
@@ -173,6 +189,34 @@ static void SHUNEI_AT_EXIT(void)
     {
         SHUNEI.atExitFunction();
     }
+}
+
+/// @brief Opts connection's socket out of raising SIGPIPE on a broken pipe, where the platform supports it. No-op elsewhere.
+static void SHUI_DisableSigPipe(SHUConnection *connection)
+{
+#ifdef SO_NOSIGPIPE
+    int noSigPipe = 1;
+    setsockopt(connection->fileDescriptor, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&noSigPipe, sizeof(noSigPipe));
+#else
+    (void)connection;
+#endif
+}
+
+/// @brief Blocks until connection's socket is ready for the requested direction. Shared by every *Wait function.
+static SHUResult SHUI_WaitForSocket(SHUConnection *connection, bool forWrite)
+{
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(connection->fileDescriptor, &fds);
+
+    int selectResult = select((int)(connection->fileDescriptor + 1), forWrite ? NULL : &fds, forWrite ? &fds : NULL, NULL, NULL);
+
+    if (selectResult < 0)
+    {
+        return SHUResult_ErrNetwork;
+    }
+
+    return SHUResult_Ok;
 }
 
 #pragma endregion Internals
@@ -228,16 +272,14 @@ SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16
     }
 #endif
 
+    SHUI_DisableSigPipe(retConnection);
+
     memset(&retConnection->address, 0, sizeof(retConnection->address));
     retConnection->address.sin_family = AF_INET;
     retConnection->address.sin_port = htons(port);
     retConnection->addressLength = sizeof(struct sockaddr_in);
 
-    if (ip == NULL)
-    {
-        retConnection->address.sin_addr.s_addr = INADDR_ANY;
-    }
-    else if (inet_pton(AF_INET, ip, &retConnection->address.sin_addr.s_addr) != 1)
+    if (inet_pton(AF_INET, ip, &retConnection->address.sin_addr.s_addr) != 1)
     {
         return SHUResult_ErrNetwork;
     }
@@ -250,7 +292,21 @@ SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16
     fcntl(retConnection->fileDescriptor, F_SETFL, flags | O_NONBLOCK);
 #endif
 
-    connect(retConnection->fileDescriptor, (struct sockaddr *)&retConnection->address, sizeof(struct sockaddr_in));
+    if (connect(retConnection->fileDescriptor, (struct sockaddr *)&retConnection->address, sizeof(struct sockaddr_in)) < 0)
+    {
+        // a non-blocking connect is expected to report "in progress" here; anything else is a real, immediate failure
+#ifdef _WIN32
+        if (WSAGetLastError() != WSAEWOULDBLOCK)
+        {
+            return SHUResult_ErrNetwork;
+        }
+#else
+        if (errno != EINPROGRESS)
+        {
+            return SHUResult_ErrNetwork;
+        }
+#endif
+    }
 
     return SHUResult_Ok;
 }
@@ -258,10 +314,13 @@ SHUResult SHU_ConnectionCreate(SHUConnection *retConnection, const char *ip, u16
 SHUResult SHU_ListenerCreate(SHUListener *retListener, const char *ip, u16 port, SHUConnection *clientConnectionsBuffer, usz maxClientConnections)
 {
     SHU_AssertNullPointer(retListener);
+    SHU_AssertNullPointer(clientConnectionsBuffer);
 
     retListener->clientConnections = clientConnectionsBuffer;
     retListener->clientCapacity = maxClientConnections;
     retListener->clientCount = 0;
+
+    memset(clientConnectionsBuffer, 0x00, maxClientConnections * sizeof(SHUConnection));
 
     retListener->connection.fileDescriptor = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -340,6 +399,7 @@ SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 
 SHUResult SHU_ListenerDestroy(SHUListener *listener)
 {
+    SHU_AssertNullPointer(listener);
     SHU_CheckReturn(SHU_ConnectionDestroy(&listener->connection));
 
     listener->clientConnections = NULL;
@@ -360,7 +420,18 @@ SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConn
         return SHUResult_ErrIndexOutOfBounds;
     }
 
-    SHUConnection *connection = listener->clientConnections + listener->clientCount;
+    SHUConnection *connection = NULL;
+
+    for (usz i = 0; i < listener->clientCapacity; i++)
+    {
+        if (listener->clientConnections[i].address.sin_port == 0)
+        {
+            connection = listener->clientConnections + i;
+            break;
+        }
+    }
+
+    SHU_Assert(connection != NULL, "Listener has room (clientCount < clientCapacity) but no free slot was found in clientConnections.");
 
     connection->addressLength = sizeof(struct sockaddr_in);
     connection->fileDescriptor = accept(listener->connection.fileDescriptor, (struct sockaddr *)&connection->address, &connection->addressLength);
@@ -385,6 +456,8 @@ SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConn
     }
 #endif
 
+    SHUI_DisableSigPipe(connection);
+
     *retClientConnection = connection;
     listener->clientCount++;
 
@@ -399,16 +472,7 @@ SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConne
 
     for (;;)
     {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(listener->connection.fileDescriptor, &fds);
-
-        int selectResult = select((int)(listener->connection.fileDescriptor + 1), &fds, NULL, NULL, NULL);
-
-        if (selectResult < 0)
-        {
-            return SHUResult_ErrNetwork;
-        }
+        SHU_CheckReturn(SHUI_WaitForSocket(&listener->connection, false));
 
         SHUResult result = SHU_ListenerCheck(listener, retClientConnection);
 
@@ -421,13 +485,27 @@ SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConne
     }
 }
 
+SHUResult SHU_ListenerReleaseClient(SHUListener *listener, SHUConnection *connection)
+{
+    SHU_AssertNullPointer(listener);
+    SHU_AssertNullPointer(connection);
+    SHU_Assert(connection >= listener->clientConnections && connection < listener->clientConnections + listener->clientCapacity,
+               "Connection was not accepted through this listener.");
+
+    SHU_CheckReturn(SHU_ConnectionDestroy(connection));
+
+    listener->clientCount--;
+
+    return SHUResult_Ok;
+}
+
 SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(data);
     SHUI_CheckPanicConnection(connection);
 
-    int bytesSent = send(connection->fileDescriptor, data, (int)dataSize, 0);
+    int bytesSent = send(connection->fileDescriptor, data, (int)dataSize, SHUI_SEND_FLAGS);
 
     if (bytesSent < 0)
     {
@@ -463,16 +541,7 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, us
 
     while (totalSent < dataSize)
     {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(connection->fileDescriptor, &fds);
-
-        int selectResult = select((int)(connection->fileDescriptor + 1), NULL, &fds, NULL, NULL);
-
-        if (selectResult < 0)
-        {
-            return SHUResult_ErrNetwork;
-        }
+        SHU_CheckReturn(SHUI_WaitForSocket(connection, true));
 
         usz sent = 0;
         SHUResult result = SHU_ConnectionSendSplit(connection, data + totalSent, dataSize - totalSent, &sent);
@@ -542,16 +611,7 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz
 
     while (totalReceived < bufferSize)
     {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(connection->fileDescriptor, &fds);
-
-        int selectResult = select((int)(connection->fileDescriptor + 1), &fds, NULL, NULL, NULL);
-
-        if (selectResult < 0)
-        {
-            return SHUResult_ErrNetwork;
-        }
+        SHU_CheckReturn(SHUI_WaitForSocket(connection, false));
 
         usz received = 0;
         SHUResult result = SHU_ConnectionReceiveSplit(connection, buffer + totalReceived, bufferSize - totalReceived, &received);

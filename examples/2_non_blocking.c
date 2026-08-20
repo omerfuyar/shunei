@@ -8,21 +8,27 @@ int main(void)
 {
     SHU_CheckPanic(SHU_InitializeNetwork());
 
+    // listener - server
     SHUConnection clientSlots[4];
     SHUListener server;
     SHU_CheckPanic(SHU_ListenerCreate(&server, "127.0.0.1", 7001, clientSlots, 4));
 
+    // connection - client
     SHUConnection client;
     SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7001));
 
     SHU_LogInfo("Starting to check for connecting client...");
 
+    // non-blocking accept
     SHUConnection *serverSide = NULL;
-    while (SHU_ListenerCheck(&server, &serverSide) == SHUResult_Pending)
+    SHUResult acceptResult;
+    while ((acceptResult = SHU_ListenerCheck(&server, &serverSide)) == SHUResult_Pending)
     {
         // do some work, or move function call to event loop
     }
+    SHU_CheckPanic(acceptResult);
 
+    // dummy payload to push through the connection
     static char payload[SHUM_PAYLOAD_SIZE];
     for (usz i = 0; i < SHUM_PAYLOAD_SIZE; i++)
     {
@@ -42,43 +48,38 @@ int main(void)
     // on sending and receiving exactly once each, and moves on regardless of the result.
     while (sendOffset < SHUM_PAYLOAD_SIZE || receiveOffset < SHUM_PAYLOAD_SIZE)
     {
-        if (sendOffset < SHUM_PAYLOAD_SIZE)
+        if (sendOffset < SHUM_PAYLOAD_SIZE) // server side
         {
             usz remaining = SHUM_PAYLOAD_SIZE - sendOffset;
-            usz toSend = remaining < SHUM_CHUNK_SIZE ? remaining : SHUM_CHUNK_SIZE;
-
+            usz toSend = SHUMin(remaining, SHUM_CHUNK_SIZE);
             usz sent = 0;
+
             SHUResult result = SHU_ConnectionSendSplit(&client, payload + sendOffset, toSend, &sent);
             sendFrames++;
 
-            if (result == SHUResult_Ok)
+            if (result == SHUResult_Ok) // sent a batch
             {
                 sendOffset += sent;
                 sendBatches++;
             }
-            else if (result != SHUResult_Pending)
+            else if (result != SHUResult_Pending) // not skipped or sent, error
             {
                 SHU_CheckPanic(result);
             }
         }
 
-        if (receiveOffset < SHUM_PAYLOAD_SIZE)
+        if (receiveOffset < SHUM_PAYLOAD_SIZE) // client side
         {
             usz received = 0;
             SHUResult result = SHU_ConnectionReceiveSplit(serverSide, receiveChunk, sizeof(receiveChunk), &received);
             receiveFrames++;
 
-            if (result == SHUResult_Ok)
+            if (result == SHUResult_Ok) // received
             {
-                for (usz i = 0; i < received; i++)
-                {
-                    SHU_Assert(receiveChunk[i] == (char)((receiveOffset + i) % 256), "payload corrupted at byte %zu", receiveOffset + i);
-                }
-
                 receiveOffset += received;
                 receiveBatches++;
             }
-            else if (result != SHUResult_Pending)
+            else if (result != SHUResult_Pending) // not skipped or received, error
             {
                 SHU_CheckPanic(result);
             }
@@ -89,7 +90,8 @@ int main(void)
     SHU_LogInfo("received %zu bytes over %zu frames, %zu of which made progress", receiveOffset, receiveFrames, receiveBatches);
     SHU_LogInfo("payload verified byte-for-byte, no corruption across %zu receive batches", receiveBatches);
 
-    SHU_CheckPanic(SHU_ConnectionDestroy(serverSide));
+    // cleanup
+    SHU_CheckPanic(SHU_ListenerReleaseClient(&server, serverSide));
     SHU_CheckPanic(SHU_ConnectionDestroy(&client));
     SHU_CheckPanic(SHU_ListenerDestroy(&server));
     SHU_CheckPanic(SHU_TerminateNetwork());

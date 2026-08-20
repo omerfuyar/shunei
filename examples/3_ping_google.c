@@ -9,6 +9,7 @@ int main(void)
 {
     SHU_CheckPanic(SHU_InitializeNetwork());
 
+    // resolve google.com to an ip, shunei only takes ips
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -27,11 +28,13 @@ int main(void)
 
     SHU_LogInfo("resolved google.com to %s", ip);
 
+    // connection - client
     SHUConnection connection;
     SHU_CheckPanic(SHU_ConnectionCreate(&connection, ip, 80));
 
+    // send a plain http request
     const char *request = "GET / HTTP/1.1\r\nHost: google.com\r\nConnection: close\r\n\r\n";
-    SHU_CheckPanic(SHU_ConnectionSendWait(&connection, request, strlen(request)));
+    SHU_CheckPanic(SHU_ConnectionSendWait(&connection, request, strlen(request), NULL));
 
     SHU_LogInfo("request sent, waiting for response...");
 
@@ -64,6 +67,7 @@ int main(void)
 
     SHU_LogInfo("connection closed by google, received %zu bytes total", totalReceived);
 
+    // cleanup
     SHU_CheckPanic(SHU_ConnectionDestroy(&connection));
     SHU_CheckPanic(SHU_TerminateNetwork());
 
