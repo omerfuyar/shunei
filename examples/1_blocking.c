@@ -15,25 +15,22 @@ int main(void)
     SHUConnection client;
     SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7000)); // this waits on the OS queue
 
-    SHU_LogInfo("waiting for the client to connect...");
+    SHU_LogInfo("Waiting for the client to connect...");
 
     SHUConnection *serverSideClient = NULL;
     SHU_CheckPanic(SHU_ListenerWait(&server, &serverSideClient));
 
-    SHU_LogInfo("client connected, sending message");
+    SHU_LogInfo("Client connected, sending message");
 
     const char *message = "hello from client";
     usz messageSize = strlen(message) + 1;
-    SHU_CheckPanic(SHU_ConnectionSendWait(&client, message, messageSize));
+    SHU_CheckPanic(SHU_ConnectionSendWait(serverSideClient, message, messageSize));
 
-    // SHU_ConnectionReceiveWait blocks until the buffer is completely filled (or the connection
-    // closes early), so the requested size has to match what we actually expect to receive --
-    // the client hasn't closed its side yet at this point, only the exact byte count would stop it.
     char buffer[128] = {0};
     usz receivedSize = 0;
-    SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSideClient, buffer, messageSize, &receivedSize));
+    SHU_CheckPanic(SHU_ConnectionReceiveWait(&client, buffer, messageSize, &receivedSize));
 
-    SHU_LogInfo("server received %zu bytes: %s", receivedSize, buffer);
+    SHU_LogInfo("Server received %zu bytes: %s", receivedSize, buffer);
 
     SHU_CheckPanic(SHU_ConnectionDestroy(serverSideClient));
     SHU_CheckPanic(SHU_ConnectionDestroy(&client));

@@ -114,8 +114,9 @@ SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, u
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
+/// @param retReceivedSize Bytes actually sent. Leave NULL if not needed.
 /// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize);
+SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
 
 /// @brief Attempts to receive data through a connection without blocking.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
@@ -131,7 +132,7 @@ SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, char *buffer, us
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
-/// @param retReceivedSize Bytes actually placed in the buffer, which is bufferSize unless the connection closed early. Leave NULL if not needed.
+/// @param retReceivedSize Bytes actually placed in the buffer. Leave NULL if not needed.
 /// @return Result of the operation. Ok once at least one byte has been received, Err if the connection was already closed before any data arrived. See SHUResult for details.
 SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
 
@@ -452,7 +453,7 @@ SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, u
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize)
+SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(data);
@@ -481,12 +482,14 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, us
             continue;
         }
 
-        if (result != SHUResult_Ok)
-        {
-            return result;
-        }
+        SHU_CheckReturn(result);
 
         totalSent += sent;
+    }
+
+    if (retSentSize != NULL)
+    {
+        *retSentSize = totalSent;
     }
 
     return SHUResult_Ok;
@@ -563,10 +566,7 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz
             break; // peer closed the connection before the buffer was filled
         }
 
-        if (result != SHUResult_Ok)
-        {
-            return result;
-        }
+        SHU_CheckReturn(result);
 
         totalReceived += received;
     }

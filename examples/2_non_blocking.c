@@ -15,9 +15,12 @@ int main(void)
     SHUConnection client;
     SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7001));
 
+    SHU_LogInfo("Starting to check for connecting client...");
+
     SHUConnection *serverSide = NULL;
     while (SHU_ListenerCheck(&server, &serverSide) == SHUResult_Pending)
     {
+        // do some work, or move function call to event loop
     }
 
     static char payload[SHUM_PAYLOAD_SIZE];
