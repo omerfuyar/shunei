@@ -101,13 +101,14 @@ SHUResult SHU_ListenerCheck(SHUListener *listener, SHUConnection **retClientConn
 /// @return Result of the operation. Pending if there is no connecting clients, Ok if there is at least one client waiting to be accepted. See SHUResult for details.
 SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConnection);
 
-/// @brief Sends data through a connection.
+/// @brief Attempts to send data through a connection without blocking.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
 /// @param data Pointer to the data to send.
 /// @param dataSize Size of the data to send.
-/// @param retSentSize Bytes sent in this batch. Leave NULL if not needed.
-/// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionSend(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
+/// @param retSentSize Bytes actually sent by this call, which may be less than dataSize. Leave NULL if not needed.
+/// @return Result of the operation. Pending if the socket cannot accept any data right now, Ok if at least one byte was sent. See SHUResult for details.
+/// @note It may only send part of dataSize. Check retSentSize even on SHUResult_Ok and call again with the remaining data (data + *retSentSize, dataSize - *retSentSize) until it has all gone out.
+SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize);
 
 /// @brief Sends data through a connection, blocking until all of it has been sent.
 /// @param connection Pointer to the SHUConnection struct representing the connection to send data through. Must not be NULL.
@@ -116,20 +117,23 @@ SHUResult SHU_ConnectionSend(SHUConnection *connection, const char *data, usz da
 /// @return Result of the operation. See SHUResult for details.
 SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, usz dataSize);
 
-/// @brief Receives data through a connection.
+/// @brief Attempts to receive data through a connection without blocking.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
-/// @param retReceivedSize Bytes received in this batch. Leave NULL if not needed.
-/// @return Result of the operation. Pending if there is no data to receive, Ok if data was received successfully. See SHUResult for details.
-SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
+/// @param retReceivedSize Bytes actually received by this call, which may be less than bufferSize. Leave NULL if not needed.
+/// @return Result of the operation. Pending if there is no data to receive yet, Ok if at least one byte was received, Err if the peer closed the connection. See SHUResult for details.
+/// @note It may only fill part of bufferSize. Check retReceivedSize on SHUResult_Ok and call again to receive the rest.
+SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
 
-/// @brief Receives data through a connection, blocking until at least some data has been received.
+/// @brief Receives data through a connection, blocking until the buffer is completely filled or the
+/// peer closes the connection, whichever happens first.
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Pointer to the buffer where received data will be stored.
 /// @param bufferSize Size of the buffer.
-/// @return Result of the operation. See SHUResult for details.
-SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize);
+/// @param retReceivedSize Bytes actually placed in the buffer, which is bufferSize unless the connection closed early. Leave NULL if not needed.
+/// @return Result of the operation. Ok once at least one byte has been received, Err if the connection was already closed before any data arrived. See SHUResult for details.
+SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize);
 
 #pragma endregion Declarations
 
@@ -392,21 +396,31 @@ SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConne
     SHU_AssertNullPointer(retClientConnection);
     SHUI_CheckPanicConnection(&listener->connection);
 
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(listener->connection.fileDescriptor, &fds);
-
-    int selectResult = select((int)(listener->connection.fileDescriptor + 1), &fds, NULL, NULL, NULL);
-
-    if (selectResult < 0)
+    for (;;)
     {
-        return SHUResult_ErrNetwork;
-    }
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(listener->connection.fileDescriptor, &fds);
 
-    return SHU_ListenerCheck(listener, retClientConnection);
+        int selectResult = select((int)(listener->connection.fileDescriptor + 1), &fds, NULL, NULL, NULL);
+
+        if (selectResult < 0)
+        {
+            return SHUResult_ErrNetwork;
+        }
+
+        SHUResult result = SHU_ListenerCheck(listener, retClientConnection);
+
+        if (result == SHUResult_Pending)
+        {
+            continue;
+        }
+
+        return result;
+    }
 }
 
-SHUResult SHU_ConnectionSend(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize)
+SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, const char *data, usz dataSize, usz *retSentSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(data);
@@ -459,31 +473,26 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, const char *data, us
             return SHUResult_ErrNetwork;
         }
 
-        int bytesSent = send(connection->fileDescriptor, data + totalSent, (int)(dataSize - totalSent), 0);
+        usz sent = 0;
+        SHUResult result = SHU_ConnectionSendSplit(connection, data + totalSent, dataSize - totalSent, &sent);
 
-        if (bytesSent < 0)
+        if (result == SHUResult_Pending)
         {
-#ifdef _WIN32
-            if (WSAGetLastError() == WSAEWOULDBLOCK)
-            {
-                continue;
-            }
-#else
-            if (errno == EWOULDBLOCK || errno == EAGAIN)
-            {
-                continue;
-            }
-#endif
-            return SHUResult_ErrNetwork;
+            continue;
         }
 
-        totalSent += (usz)bytesSent;
+        if (result != SHUResult_Ok)
+        {
+            return result;
+        }
+
+        totalSent += sent;
     }
 
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize)
+SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(buffer);
@@ -507,6 +516,11 @@ SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz buf
         return SHUResult_ErrNetwork;
     }
 
+    if (bytesReceived == 0)
+    {
+        return SHUResult_Err; // peer closed the connection
+    }
+
     if (retReceivedSize != NULL)
     {
         *retReceivedSize = (usz)bytesReceived;
@@ -515,24 +529,54 @@ SHUResult SHU_ConnectionReceive(SHUConnection *connection, char *buffer, usz buf
     return SHUResult_Ok;
 }
 
-SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize)
+SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, char *buffer, usz bufferSize, usz *retReceivedSize)
 {
     SHU_AssertNullPointer(connection);
     SHU_AssertNullPointer(buffer);
     SHUI_CheckPanicConnection(connection);
 
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(connection->fileDescriptor, &fds);
+    usz totalReceived = 0;
 
-    int selectResult = select((int)(connection->fileDescriptor + 1), &fds, NULL, NULL, NULL);
-
-    if (selectResult < 0)
+    while (totalReceived < bufferSize)
     {
-        return SHUResult_ErrNetwork;
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(connection->fileDescriptor, &fds);
+
+        int selectResult = select((int)(connection->fileDescriptor + 1), &fds, NULL, NULL, NULL);
+
+        if (selectResult < 0)
+        {
+            return SHUResult_ErrNetwork;
+        }
+
+        usz received = 0;
+        SHUResult result = SHU_ConnectionReceiveSplit(connection, buffer + totalReceived, bufferSize - totalReceived, &received);
+
+        if (result == SHUResult_Pending)
+        {
+            continue;
+        }
+
+        if (result == SHUResult_Err)
+        {
+            break; // peer closed the connection before the buffer was filled
+        }
+
+        if (result != SHUResult_Ok)
+        {
+            return result;
+        }
+
+        totalReceived += received;
     }
 
-    return SHU_ConnectionReceive(connection, buffer, bufferSize, NULL);
+    if (retReceivedSize != NULL)
+    {
+        *retReceivedSize = totalReceived;
+    }
+
+    return totalReceived > 0 ? SHUResult_Ok : SHUResult_Err;
 }
 
 #endif

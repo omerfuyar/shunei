@@ -3,31 +3,39 @@
 
 int main(void)
 {
+    // init before using any functions
     SHU_CheckPanic(SHU_InitializeNetwork());
 
+    // listener - server
     SHUConnection clientSlots[4];
     SHUListener server;
-    SHU_CheckPanic(SHU_ListenerCreate(&server, "127.0.0.1", 7000, clientSlots, 4));
+    SHU_CheckPanic(SHU_ListenerCreate(&server, "127.0.0.1", 7000, clientSlots, 4)); //
 
+    // connection - client
     SHUConnection client;
-    SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7000));
+    SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7000)); // this waits on the OS queue
 
     SHU_LogInfo("waiting for the client to connect...");
 
-    SHUConnection *serverSide = NULL;
-    SHU_CheckPanic(SHU_ListenerWait(&server, &serverSide));
+    SHUConnection *serverSideClient = NULL;
+    SHU_CheckPanic(SHU_ListenerWait(&server, &serverSideClient));
 
     SHU_LogInfo("client connected, sending message");
 
     const char *message = "hello from client";
-    SHU_CheckPanic(SHU_ConnectionSendWait(&client, message, strlen(message) + 1));
+    usz messageSize = strlen(message) + 1;
+    SHU_CheckPanic(SHU_ConnectionSendWait(&client, message, messageSize));
 
+    // SHU_ConnectionReceiveWait blocks until the buffer is completely filled (or the connection
+    // closes early), so the requested size has to match what we actually expect to receive --
+    // the client hasn't closed its side yet at this point, only the exact byte count would stop it.
     char buffer[128] = {0};
-    SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSide, buffer, sizeof(buffer)));
+    usz receivedSize = 0;
+    SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSideClient, buffer, messageSize, &receivedSize));
 
-    SHU_LogInfo("server received: %s", buffer);
+    SHU_LogInfo("server received %zu bytes: %s", receivedSize, buffer);
 
-    SHU_CheckPanic(SHU_ConnectionDestroy(serverSide));
+    SHU_CheckPanic(SHU_ConnectionDestroy(serverSideClient));
     SHU_CheckPanic(SHU_ConnectionDestroy(&client));
     SHU_CheckPanic(SHU_ListenerDestroy(&server));
     SHU_CheckPanic(SHU_TerminateNetwork());

@@ -42,15 +42,16 @@ int main(void)
 
     for (;;)
     {
-        while ((result = SHU_ConnectionReceive(&connection, buffer, sizeof(buffer) - 1, &receivedSize)) == SHUResult_Pending)
+        while ((result = SHU_ConnectionReceiveSplit(&connection, buffer, sizeof(buffer) - 1, &receivedSize)) == SHUResult_Pending)
         {
         }
-        SHU_CheckPanic(result);
 
-        if (receivedSize == 0)
+        if (result == SHUResult_Err)
         {
             break; // google closed the connection, response is complete
         }
+
+        SHU_CheckPanic(result);
 
         buffer[receivedSize] = '\0';
         totalReceived += receivedSize;
