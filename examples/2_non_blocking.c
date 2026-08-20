@@ -1,8 +1,6 @@
 #define SHU_IMPLEMENTATION
 #include "../shunei.h"
 
-//! On Windows, link against ws2_32
-
 int main(void)
 {
     SHU_CheckPanic(SHU_InitializeNetwork());
