@@ -36,7 +36,8 @@ int main(int argc, char **argv)
 
     ShuildExample("1_blocking");
     ShuildExample("2_non_blocking");
-    ShuildExample("3_ping_google");
+    ShuildExample("3_ping_blocking");
+    ShuildExample("4_ping_non_blocking");
 
     return 0;
 }

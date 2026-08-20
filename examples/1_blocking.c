@@ -33,7 +33,7 @@ int main(void)
     usz receivedSize = 0;
     SHU_CheckPanic(SHU_ConnectionReceiveWait(serverSideClient, cs(buffer, messageSize), &receivedSize));
 
-    SHU_LogInfo("Server received %zu out of %zu bytes: %s", receivedSize, messageSize, buffer);
+    SHU_LogInfo("Server received %zu out of %zu bytes: '%s'", receivedSize, messageSize, buffer);
 
     // cleanup
     SHU_CheckPanic(SHU_ListenerReleaseClient(&server, serverSideClient));

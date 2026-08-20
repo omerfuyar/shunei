@@ -5,9 +5,9 @@ int main(void)
 {
     SHU_CheckPanic(SHU_InitializeNetwork());
 
-    // resolve google.com to an ip, shunei only takes ips
+    // resolve google.com to an ip
     char ip[SHUM_ADDRESS_STRLEN];
-    SHU_CheckPanic(SHU_DnsResolve("google.com", cs(ip, sizeof(ip))));
+    SHU_CheckPanic(SHU_ResolveDNS("google.com", cs(ip, sizeof(ip))));
 
     SHU_LogInfo("resolved google.com to %s", ip);
 
@@ -26,13 +26,15 @@ int main(void)
     usz totalReceived = 0;
     SHUResult result;
 
-    for (;;)
+    for (usz passCount = 0;; passCount++)
     {
-        while ((result = SHU_ConnectionReceiveSplit(&connection, cs(buffer, sizeof(buffer) - 1), &receivedSize)) == SHUResult_Pending)
-        {
-        }
+        // google sends 792 bytes:
+        // first call 511 bytes received and printed
+        // second call 281 bytes received and printed
+        // third call is the finish call where google closes the connection
+        result = SHU_ConnectionReceiveWait(&connection, cs(buffer, sizeof(buffer) - 1), &receivedSize);
 
-        if (result == SHUResult_Err)
+        if (result == SHUResult_Finished)
         {
             break; // google closed the connection, response is complete
         }
@@ -42,10 +44,7 @@ int main(void)
         buffer[receivedSize] = '\0';
         totalReceived += receivedSize;
 
-        if (totalReceived <= sizeof(buffer)) // only print the first chunk, the rest is body we don't care about here
-        {
-            SHU_LogInfo("first bytes of response:\n%s", buffer);
-        }
+        SHU_LogInfo("pass %zu data %zu bytes :\n'%s'", passCount, receivedSize, buffer);
     }
 
     SHU_LogInfo("connection closed by google, received %zu bytes total", totalReceived);

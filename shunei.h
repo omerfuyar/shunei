@@ -66,7 +66,7 @@ SHUResult SHU_TerminateNetwork(void);
 /// @param hostname Hostname to resolve, e.g. "google.com". Must not be NULL.
 /// @param retIp Buffer that receives the resolved address.
 /// @return Result of the operation. ErrNetwork if the hostname could not be resolved, ErrOverflow if retIpCapacity is too small. See SHUResult for details.
-SHUResult SHU_DnsResolve(const char *hostname, SHUSlice retIp);
+SHUResult SHU_ResolveDNS(const char *hostname, SHUSlice retIp);
 
 /// @brief Creates and configures a client connection to the specified ip and port.
 /// @param retConnection Pointer to a SHUConnection struct where the created connection information will be stored. Must not be NULL.
@@ -132,7 +132,7 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, SHUSliceView data, u
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Slice of the buffer where received data will be stored. buffer.data must not be NULL.
 /// @param retReceivedSize Bytes actually received by this call, which may be less than buffer.size. Leave NULL if not needed.
-/// @return Result of the operation. Pending if there is no data to receive yet, Ok if at least one byte was received, Err if the peer closed the connection. See SHUResult for details.
+/// @return Result of the operation. Pending if there is no data to receive yet, Ok if at least one byte was received, Finished if the peer closed the connection. See SHUResult for details.
 /// @note It may only fill part of buffer.size. Check retReceivedSize on SHUResult_Ok and call again to receive the rest.
 SHUWUR SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice buffer, usz *retReceivedSize);
 
@@ -141,7 +141,7 @@ SHUWUR SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice 
 /// @param connection Pointer to the SHUConnection struct representing the connection to receive data from. Must not be NULL.
 /// @param buffer Slice of the buffer where received data will be stored. buffer.data must not be NULL.
 /// @param retReceivedSize Bytes actually placed in the buffer. Leave NULL if not needed.
-/// @return Result of the operation. Ok once at least one byte has been received, Err if the connection was already closed before any data arrived. See SHUResult for details.
+/// @return Result of the operation. Ok once at least one byte has been received, Finished if the connection was already closed before any data arrived. See SHUResult for details.
 SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, usz *retReceivedSize);
 
 #pragma endregion Declarations
@@ -205,6 +205,20 @@ static void SHUI_DisableSigPipe(SHUConnection *connection)
 #endif
 }
 
+#ifdef _WIN32
+/// @brief Windows-only: send()/recv() on a socket whose non-blocking connect() hasn't finished yet report
+/// WSAENOTCONN, identically whether the connect is still in progress or has already failed -- unlike POSIX,
+/// where this case is already covered by EWOULDBLOCK/EAGAIN. SO_ERROR disambiguates: still 0 means the
+/// connect genuinely hasn't resolved yet, nonzero means it has and this really is a failure.
+static bool SHUI_IsStillConnecting(SHUConnection *connection)
+{
+    i32 soError = 0;
+    i32 soErrorLen = sizeof(soError);
+    getsockopt(connection->fileDescriptor, SOL_SOCKET, SO_ERROR, (char *)&soError, &soErrorLen);
+    return soError == 0;
+}
+#endif
+
 /// @brief Blocks until connection's socket is ready for the requested direction. Shared by every *Wait function.
 static SHUResult SHUI_WaitForSocket(SHUConnection *connection, bool forWrite)
 {
@@ -256,7 +270,7 @@ SHUResult SHU_TerminateNetwork(void)
     return SHUResult_Ok;
 }
 
-SHUResult SHU_DnsResolve(const char *hostname, SHUSlice retIp)
+SHUResult SHU_ResolveDNS(const char *hostname, SHUSlice retIp)
 {
     SHU_AssertNullPointer(hostname);
     SHU_AssertSlice(retIp);
@@ -540,7 +554,8 @@ SHUResult SHU_ConnectionSendSplit(SHUConnection *connection, SHUSliceView data, 
     if (bytesSent < 0)
     {
 #ifdef _WIN32
-        if (WSAGetLastError() == WSAEWOULDBLOCK)
+        i32 wsaError = WSAGetLastError();
+        if (wsaError == WSAEWOULDBLOCK || (wsaError == WSAENOTCONN && SHUI_IsStillConnecting(connection)))
         {
             return SHUResult_Pending;
         }
@@ -606,7 +621,8 @@ SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice buffer,
     if (bytesReceived < 0)
     {
 #ifdef _WIN32
-        if (WSAGetLastError() == WSAEWOULDBLOCK)
+        i32 wsaError = WSAGetLastError();
+        if (wsaError == WSAEWOULDBLOCK || (wsaError == WSAENOTCONN && SHUI_IsStillConnecting(connection)))
         {
             return SHUResult_Pending;
         }
@@ -621,7 +637,7 @@ SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice buffer,
 
     if (bytesReceived == 0)
     {
-        return SHUResult_Err; // peer closed the connection
+        return SHUResult_Finished; // peer closed the connection
     }
 
     if (retReceivedSize != NULL)
@@ -635,7 +651,7 @@ SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice buffer,
 SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, usz *retReceivedSize)
 {
     SHU_AssertNullPointer(connection);
-    SHU_AssertNullPointer(buffer.data);
+    SHU_AssertSlice(buffer);
     SHUI_AssertConnection(connection);
 
     usz totalReceived = 0;
@@ -653,7 +669,7 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, 
             continue;
         }
 
-        if (result == SHUResult_Err)
+        if (result == SHUResult_Finished)
         {
             break; // peer closed the connection before the buffer was filled
         }
@@ -668,7 +684,7 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, 
         *retReceivedSize = totalReceived;
     }
 
-    return totalReceived > 0 ? SHUResult_Ok : SHUResult_Err;
+    return totalReceived > 0 ? SHUResult_Ok : SHUResult_Finished;
 }
 
 #endif

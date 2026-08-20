@@ -88,7 +88,6 @@ int main(void)
 
     SHU_LogInfo("sent %zu bytes over %zu frames, %zu of which made progress", sendOffset, sendFrames, sendBatches);
     SHU_LogInfo("received %zu bytes over %zu frames, %zu of which made progress", receiveOffset, receiveFrames, receiveBatches);
-    SHU_LogInfo("payload verified byte-for-byte, no corruption across %zu receive batches", receiveBatches);
 
     // cleanup
     SHU_CheckPanic(SHU_ListenerReleaseClient(&server, serverSide));
