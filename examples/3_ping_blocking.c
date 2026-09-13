@@ -3,21 +3,21 @@
 
 int main(void)
 {
-    SHU_CheckPanic(SHU_InitializeNetwork());
+    SHU_AssertResult(SHU_InitializeNetwork());
 
     // resolve google.com to an ip
     char ip[SHUM_ADDRESS_STRLEN];
-    SHU_CheckPanic(SHU_ResolveDNS("google.com", cs(ip, sizeof(ip))));
+    SHU_AssertResult(SHU_ResolveDNS("google.com", cs(ip, sizeof(ip))));
 
     SHU_LogInfo("resolved google.com to %s", ip);
 
     // connection - client
     SHUConnection connection;
-    SHU_CheckPanic(SHU_ConnectionCreate(&connection, ip, 80));
+    SHU_AssertResult(SHU_ConnectionCreate(&connection, ip, 80));
 
     // send a plain http request
     const char *request = "GET / HTTP/1.1\r\nHost: google.com\r\nConnection: close\r\n\r\n";
-    SHU_CheckPanic(SHU_ConnectionSendWait(&connection, csv(cs((void *)request, strlen(request))), NULL));
+    SHU_AssertResult(SHU_ConnectionSendWait(&connection, csv(cs((void *)request, strlen(request))), NULL));
 
     SHU_LogInfo("request sent, waiting for response...");
 
@@ -39,7 +39,7 @@ int main(void)
             break; // google closed the connection, response is complete
         }
 
-        SHU_CheckPanic(result);
+        SHU_AssertResult(result);
 
         buffer[receivedSize] = '\0';
         totalReceived += receivedSize;
@@ -50,8 +50,8 @@ int main(void)
     SHU_LogInfo("connection closed by google, received %zu bytes total", totalReceived);
 
     // cleanup
-    SHU_CheckPanic(SHU_ConnectionDestroy(&connection));
-    SHU_CheckPanic(SHU_TerminateNetwork());
+    SHU_AssertResult(SHU_ConnectionDestroy(&connection));
+    SHU_AssertResult(SHU_TerminateNetwork());
 
     return 0;
 }

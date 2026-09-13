@@ -6,16 +6,16 @@
 
 int main(void)
 {
-    SHU_CheckPanic(SHU_InitializeNetwork());
+    SHU_AssertResult(SHU_InitializeNetwork());
 
     // listener - server
     SHUConnection clientSlots[4];
     SHUListener server;
-    SHU_CheckPanic(SHU_ListenerCreate(&server, "127.0.0.1", 7001, clientSlots, 4));
+    SHU_AssertResult(SHU_ListenerCreate(&server, "127.0.0.1", 7001, clientSlots, 4));
 
     // connection - client
     SHUConnection client;
-    SHU_CheckPanic(SHU_ConnectionCreate(&client, "127.0.0.1", 7001));
+    SHU_AssertResult(SHU_ConnectionCreate(&client, "127.0.0.1", 7001));
 
     SHU_LogInfo("Starting to check for connecting client...");
 
@@ -26,7 +26,7 @@ int main(void)
     {
         // do some work, or move function call to event loop
     }
-    SHU_CheckPanic(acceptResult);
+    SHU_AssertResult(acceptResult);
 
     // dummy payload to push through the connection
     static char payload[SHUM_PAYLOAD_SIZE];
@@ -64,7 +64,7 @@ int main(void)
             }
             else if (result != SHUResult_Pending) // not skipped or sent, error
             {
-                SHU_CheckPanic(result);
+                SHU_AssertResult(result);
             }
         }
 
@@ -81,7 +81,7 @@ int main(void)
             }
             else if (result != SHUResult_Pending) // not skipped or received, error
             {
-                SHU_CheckPanic(result);
+                SHU_AssertResult(result);
             }
         }
     }
@@ -90,10 +90,10 @@ int main(void)
     SHU_LogInfo("received %zu bytes over %zu frames, %zu of which made progress", receiveOffset, receiveFrames, receiveBatches);
 
     // cleanup
-    SHU_CheckPanic(SHU_ListenerReleaseClient(&server, serverSide));
-    SHU_CheckPanic(SHU_ConnectionDestroy(&client));
-    SHU_CheckPanic(SHU_ListenerDestroy(&server));
-    SHU_CheckPanic(SHU_TerminateNetwork());
+    SHU_AssertResult(SHU_ListenerReleaseClient(&server, serverSide));
+    SHU_AssertResult(SHU_ConnectionDestroy(&client));
+    SHU_AssertResult(SHU_ListenerDestroy(&server));
+    SHU_AssertResult(SHU_TerminateNetwork());
 
     return 0;
 }

@@ -273,7 +273,6 @@ SHUResult SHU_TerminateNetwork(void)
 SHUResult SHU_ResolveDNS(const char *hostname, SHUSlice retIp)
 {
     SHU_AssertNullPointer(hostname);
-    SHU_AssertSlice(retIp);
 
     struct addrinfo hints = {0};
     hints.ai_family = AF_INET;
@@ -444,7 +443,7 @@ SHUResult SHU_ConnectionDestroy(SHUConnection *connection)
 SHUResult SHU_ListenerDestroy(SHUListener *listener)
 {
     SHU_AssertNullPointer(listener);
-    SHU_CheckReturn(SHU_ConnectionDestroy(&listener->connection));
+    SHU_ReturnResult(SHU_ConnectionDestroy(&listener->connection));
 
     listener->clientConnections = NULL;
     listener->clientCount = 0;
@@ -516,7 +515,7 @@ SHUResult SHU_ListenerWait(SHUListener *listener, SHUConnection **retClientConne
 
     for (;;)
     {
-        SHU_CheckReturn(SHUI_WaitForSocket(&listener->connection, false));
+        SHU_ReturnResult(SHUI_WaitForSocket(&listener->connection, false));
 
         SHUResult result = SHU_ListenerCheck(listener, retClientConnection);
 
@@ -536,7 +535,7 @@ SHUResult SHU_ListenerReleaseClient(SHUListener *listener, SHUConnection *connec
     SHU_Assert(connection >= listener->clientConnections && connection < listener->clientConnections + listener->clientCapacity,
                "Connection was not accepted through this listener.");
 
-    SHU_CheckReturn(SHU_ConnectionDestroy(connection));
+    SHU_ReturnResult(SHU_ConnectionDestroy(connection));
 
     listener->clientCount--;
 
@@ -586,7 +585,7 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, SHUSliceView data, u
 
     while (totalSent < data.size)
     {
-        SHU_CheckReturn(SHUI_WaitForSocket(connection, true));
+        SHU_ReturnResult(SHUI_WaitForSocket(connection, true));
 
         usz sent = 0;
         SHUSliceView remaining = csv(cs((void *)((const u8 *)data.data + totalSent), data.size - totalSent));
@@ -597,7 +596,7 @@ SHUResult SHU_ConnectionSendWait(SHUConnection *connection, SHUSliceView data, u
             continue;
         }
 
-        SHU_CheckReturn(result);
+        SHU_ReturnResult(result);
 
         totalSent += sent;
     }
@@ -651,14 +650,13 @@ SHUResult SHU_ConnectionReceiveSplit(SHUConnection *connection, SHUSlice buffer,
 SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, usz *retReceivedSize)
 {
     SHU_AssertNullPointer(connection);
-    SHU_AssertSlice(buffer);
     SHUI_AssertConnection(connection);
 
     usz totalReceived = 0;
 
     while (totalReceived < buffer.size)
     {
-        SHU_CheckReturn(SHUI_WaitForSocket(connection, false));
+        SHU_ReturnResult(SHUI_WaitForSocket(connection, false));
 
         usz received = 0;
         SHUSlice remaining = cs((u8 *)buffer.data + totalReceived, buffer.size - totalReceived);
@@ -674,7 +672,7 @@ SHUResult SHU_ConnectionReceiveWait(SHUConnection *connection, SHUSlice buffer, 
             break; // peer closed the connection before the buffer was filled
         }
 
-        SHU_CheckReturn(result);
+        SHU_ReturnResult(result);
 
         totalReceived += received;
     }
